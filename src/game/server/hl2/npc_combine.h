@@ -123,6 +123,18 @@ public:
 	bool			IsRunningApproachEnemySchedule();
 
 	// -------------
+	// Project 1: +use conversion
+	// -------------
+	virtual int		ObjectCaps();	// makes hostile soldiers +useable
+	virtual void	Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+
+	// Project 1: commander mode (converted NPCs follow the player or go where he sends them)
+	virtual bool	IsCommandable();
+	virtual bool	TargetOrder( CBaseEntity *pTarget, CAI_BaseNPC **Allies, int numAllies );
+	virtual void	OnMoveToCommandGoalFailed();
+	virtual CAI_BaseNPC *GetSquadCommandRepresentative();
+
+	// -------------
 	// Sounds
 	// -------------
 	void			DeathSound( void );
@@ -261,6 +273,11 @@ private:
 	EHANDLE			m_hForcedGrenadeTarget;
 	bool			m_bShouldPatrol;
 	bool			m_bFirstEncounter;// only put on the handsign show in the squad's first encounter.
+
+	// Project 1: +use conversion state
+	bool			m_bP1Converting;	// got +used, is flinching and waiting to switch sides
+	bool			m_bP1Converted;		// already fights for the player
+	float			m_flP1ConvertTime;	// gpGlobals->curtime at which the conversion completes
 
 	// Time Variables
 	float			m_flNextPainSoundTime;

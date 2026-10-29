@@ -475,13 +475,17 @@ private:
 
 extern CAI_Manager g_AI_Manager;
 
+// Project 1: highest captain level (captain + 15 followers = 16 squad members,
+// which matches the engine's MAX_SQUAD_MEMBERS)
+#define P1_CAPTAIN_MAX_LEVEL	15
+
 //=============================================================================
 //
 //	class CAI_BaseNPC
 //
 //=============================================================================
 
-class CAI_BaseNPC : public CBaseCombatCharacter, 
+class CAI_BaseNPC : public CBaseCombatCharacter,
 					public CAI_DefMovementSink
 {
 	DECLARE_CLASS( CAI_BaseNPC, CBaseCombatCharacter );
@@ -1548,6 +1552,31 @@ public:
 	float				GetLastPlayerDamageTime() const { return m_flLastPlayerDamageTime; }
 	float				GetLastEnemyTime() const { return m_flLastEnemyTime; }
 
+	// Project 1: captain identity. A number of 0 means "ordinary grunt".
+	// The captain registry file will own these values later; for now the debug
+	// commands in ai_concommands.cpp are the only thing that sets them.
+	bool				IsP1Captain() const { return m_iP1CaptainNumber != 0; }
+	int					GetP1CaptainNumber() const { return m_iP1CaptainNumber; }
+	int					GetP1CaptainLevel() const { return m_iP1CaptainLevel; }
+	void				P1_MakeCaptain( int iNumber, int iLevel );	// iNumber 0 = keep current / pick a free one
+
+	// Project 1: stun and shame (captains only, see OnTakeDamage_Alive)
+	// Stunned: electrocuted by the stunstick, can't act for a few seconds, and can be converted with +use.
+	// Shamed:  took a lethal crowbar blow, drops his weapon, loses levels and runs from the player.
+	bool				P1_IsStunned() const { return m_flP1StunEndTime > gpGlobals->curtime; }
+	bool				P1_IsShamed() const { return m_flP1ShameEndTime > gpGlobals->curtime; }
+	int					GetP1CaptainShames() const { return m_iP1CaptainShames; }
+	void				P1_Stun( float flSeconds = -1.0f );		// negative = use the p1_captain_stun_time convar
+	void				P1_EndStun() { m_flP1StunEndTime = 0; }
+	void				P1_Shame( CBaseEntity *pAttacker );
+
+	// Project 1: level scaling. A captain has (ordinary health * level * p1_captain_health_per_level)
+	// health and deals (1 + level * p1_captain_damage_per_level) times the normal damage.
+	// P1_ApplyLevelStats() re-applies the health part, it runs whenever the level changes.
+	float				P1_GetDamageScale() const;
+	void				P1_ApplyLevelStats();
+	virtual float		GetAttackDamageScale( CBaseEntity *pVictim );	// CBaseEntity::TakeDamage asks the attacker for this
+
 	// Set up the shot regulator based on the equipped weapon
 	virtual void		OnChangeActiveWeapon( CBaseCombatWeapon *pOldWeapon, CBaseCombatWeapon *pNewWeapon );
 
@@ -1581,6 +1610,16 @@ protected:
 	float				m_flLastSawPlayerTime;		// Last time I saw the player
 	float				m_flLastAttackTime;			// Last time that I attacked my current enemy
 	float				m_flLastEnemyTime;
+
+	// Project 1: captain identity (see IsP1Captain())
+	int					m_iP1CaptainNumber;			// unique 4-digit callsign, 0 = not a captain
+	int					m_iP1CaptainLevel;			// 1 .. P1_CAPTAIN_MAX_LEVEL
+	int					m_iP1CaptainShames;			// how often he was shamed, each one is a permanent scar
+	int					m_iP1BaseMaxHealth;			// his max health before he became a captain, 0 = not recorded yet
+	float				m_flP1StunEndTime;			// gpGlobals->curtime at which the stun ends
+	float				m_flP1ShameEndTime;			// gpGlobals->curtime at which he stops fleeing
+	float				m_flP1NextStunFx;			// next time to draw the electric arcs (not saved)
+
 	float				m_flNextWeaponSearchTime;	// next time to search for a better weapon
 	string_t			m_iszPendingWeapon;			// THe NPC should create and equip this weapon.
 	bool				m_bIgnoreUnseenEnemies;

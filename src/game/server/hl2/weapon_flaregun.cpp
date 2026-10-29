@@ -657,12 +657,19 @@ void CFlare::AddToActiveFlares( void )
 	}
 }
 
-#if 0
+// P1 PATCH: Valve disabled the whole weapon half of this file with "#if 0".
+// Everything below is the original, unchanged beta flare gun code. Removing
+// the #if 0 / #endif pair is what brings the weapon back.
 
+// Network table: tells the engine how to send this entity class to the client.
+// The matching client class is the stub for weapon_flaregun in
+// c_weapon__stubs_hl2.cpp (it must be named "DT_Flaregun" on both sides).
 IMPLEMENT_SERVERCLASS_ST(CFlaregun, DT_Flaregun)
 END_SEND_TABLE()
 
+// Makes "give weapon_flaregun" (and map entities) create a CFlaregun.
 LINK_ENTITY_TO_CLASS( weapon_flaregun, CFlaregun );
+// Registers the weapon so its script (scripts/weapon_flaregun.txt) gets precached.
 PRECACHE_WEAPON_REGISTER( weapon_flaregun );
 
 //-----------------------------------------------------------------------------
@@ -751,5 +758,3 @@ void CFlaregun::SecondaryAttack( void )
 
 	WeaponSound( SINGLE );
 }
-
-#endif

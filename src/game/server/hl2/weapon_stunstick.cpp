@@ -2,7 +2,7 @@
 //
 // Purpose:		Stun Stick- beating stick with a zappy end
 //
-// $NoKeywords: $
+// $NoKeywords: $FixedByTheMaster974
 //=============================================================================//
 
 #include "cbase.h"
@@ -10,12 +10,20 @@
 #include "npc_metropolice.h"
 #include "weapon_stunstick.h"
 #include "IEffects.h"
+#include "in_buttons.h" // Addition.
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 ConVar    sk_plr_dmg_stunstick	( "sk_plr_dmg_stunstick","0");
 ConVar    sk_npc_dmg_stunstick	( "sk_npc_dmg_stunstick","0");
+
+// -------------------------------------------------------------------------------
+// This keeps track of whether or not the player is in possession of a Stunstick.
+// If the player has a Stunstick, gives the player a suit battery. This is set as
+// a hidden ConVar, so players can't really change it (unless they know the name).
+// -------------------------------------------------------------------------------
+ConVar	  does_player_have_stunstick("does_player_have_stunstick", "0", FCVAR_HIDDEN, "Internal variable to keep track of the player's ownership of a stunstick.");
 
 extern ConVar metropolice_move_and_melee;
 
@@ -25,6 +33,7 @@ extern ConVar metropolice_move_and_melee;
 
 IMPLEMENT_SERVERCLASS_ST(CWeaponStunStick, DT_WeaponStunStick)
 	SendPropInt( SENDINFO( m_bActive ), 1, SPROP_UNSIGNED ),
+	SendPropInt( SENDINFO( m_bInSwing), 1, SPROP_UNSIGNED ), // Addition.
 END_SEND_TABLE()
 
 #ifndef HL2MP
@@ -44,10 +53,18 @@ IMPLEMENT_ACTTABLE(CWeaponStunStick);
 BEGIN_DATADESC( CWeaponStunStick )
 
 	DEFINE_FIELD( m_bActive, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_bInSwing, FIELD_BOOLEAN ), // Addition.
 
 END_DATADESC()
 
+// ----------------------------------------------------------------------------------
+// Materials for the glow effect are defined here, as they will need to be precached.
+// ----------------------------------------------------------------------------------
 
+#define	STUNSTICK_BEAM_MATERIAL		"sprites/lgtning.vmt"
+#define STUNSTICK_GLOW_MATERIAL		"sprites/light_glow02_add.vmt"
+#define STUNSTICK_GLOW_MATERIAL2	"effects/blueflare1.vmt"
+#define STUNSTICK_GLOW_MATERIAL_NOZ	"sprites/light_glow02_add_noz.vmt"
 
 //-----------------------------------------------------------------------------
 // Constructor
@@ -57,6 +74,15 @@ CWeaponStunStick::CWeaponStunStick( void )
 	// HACK:  Don't call SetStunState because this tried to Emit a sound before
 	//  any players are connected which is a bug
 	m_bActive = false;
+	m_bInSwing = false; // Addition.
+}
+
+// ----------
+// Destructor
+// ----------
+CWeaponStunStick::~CWeaponStunStick(void)
+{
+	does_player_have_stunstick.SetValue(0); // The player doesn't have a Stunstick by default.
 }
 
 //-----------------------------------------------------------------------------
@@ -77,6 +103,13 @@ void CWeaponStunStick::Precache()
 	PrecacheScriptSound( "Weapon_StunStick.Activate" );
 	PrecacheScriptSound( "Weapon_StunStick.Deactivate" );
 
+// ----------
+// Additions.
+// ----------
+	PrecacheModel(STUNSTICK_BEAM_MATERIAL);
+	PrecacheModel(STUNSTICK_GLOW_MATERIAL);
+	PrecacheModel(STUNSTICK_GLOW_MATERIAL2);
+	PrecacheModel(STUNSTICK_GLOW_MATERIAL_NOZ);
 }
 
 //-----------------------------------------------------------------------------
@@ -168,9 +201,9 @@ int CWeaponStunStick::WeaponMeleeAttack1Condition( float flDot, float flDist )
 	return COND_CAN_MELEE_ATTACK1;
 }
 
-
+/*
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose: Removed!
 //-----------------------------------------------------------------------------
 void CWeaponStunStick::ImpactEffect( trace_t &traceHit )
 {
@@ -180,6 +213,7 @@ void CWeaponStunStick::ImpactEffect( trace_t &traceHit )
 	//FIXME: need new decals
 	UTIL_ImpactTrace( &traceHit, DMG_CLUB );
 }
+*/
 
 void CWeaponStunStick::Operator_HandleAnimEvent( animevent_t *pEvent, CBaseCombatCharacter *pOperator )
 {
@@ -334,7 +368,7 @@ void CWeaponStunStick::SetStunState( bool state )
 bool CWeaponStunStick::Deploy( void )
 {
 	SetStunState( true );
-
+	m_bInSwing = false; // Addition.
 	return BaseClass::Deploy();
 }
 
@@ -347,7 +381,7 @@ bool CWeaponStunStick::Holster( CBaseCombatWeapon *pSwitchingTo )
 		return false;
 
 	SetStunState( false );
-
+	m_bInSwing = false; // Addition.
 	return true;
 }
 
@@ -359,7 +393,27 @@ void CWeaponStunStick::Drop( const Vector &vecVelocity )
 {
 	SetStunState( false );
 
+// ----------
+// Additions.
+// ----------
+	m_bInSwing = false; // We are not swinging.
+	CBasePlayer* pPlayer = ToBasePlayer(GetOwner()); // Find the player.
+	if (pPlayer)
+		does_player_have_stunstick.SetValue(0); // If we have a player, they don't have a Stunstick.
+
 	BaseClass::Drop( vecVelocity );
+}
+
+// ----------------------------------------------------
+// What happens when a player is on top of a Stunstick?
+// ----------------------------------------------------
+void CWeaponStunStick::Equip(CBaseCombatCharacter* pOwner)
+{
+	bool stunCheck = does_player_have_stunstick.GetBool(); // Get the value of the Stunstick check ConVar.
+	if (!stunCheck)
+		does_player_have_stunstick.SetValue(1); // If the value is 0, set it to 1.
+
+	BaseClass::Equip(pOwner); // Run standard Equip code.
 }
 
 //-----------------------------------------------------------------------------
@@ -369,4 +423,52 @@ void CWeaponStunStick::Drop( const Vector &vecVelocity )
 bool CWeaponStunStick::GetStunState( void )
 {
 	return m_bActive;
+}
+
+// ----------
+// Additions.
+// ----------
+
+void CWeaponStunStick::PrimaryAttack(void)
+{
+	m_bInSwing = true; // If we are attacking, we are in the middle of a swing.
+	BaseClass::PrimaryAttack(); // Run standard PrimaryAttack code.
+}
+
+void CWeaponStunStick::ItemPostFrame(void)
+{
+	CBasePlayer* pOwner = ToBasePlayer(GetOwner()); // Find the player.
+	if (pOwner == NULL)
+		return;
+
+	does_player_have_stunstick.SetValue(1); // Always set the value of the Stunstick check ConVar to 1 if the player has a Stunstick.
+
+	if ((pOwner->m_nButtons & IN_ATTACK) && (m_flNextPrimaryAttack <= gpGlobals->curtime))
+	{
+		PrimaryAttack(); // Do an attack if the attack button was pressed or is being held.
+	}
+	else
+	{
+		WeaponIdle(); // Otherwise, we can idle.
+		m_bInSwing = false; // Also, we are not in the middle of a swing!
+		return;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Add in a view kick for this weapon
+//-----------------------------------------------------------------------------
+void CWeaponStunStick::AddViewKick(void)
+{
+	CBasePlayer* pPlayer = ToBasePlayer(GetOwner()); // Find the player.
+	if (pPlayer == NULL)
+		return;
+
+	QAngle punchAng; // Create a stock QAngle and give it some random values.
+
+	punchAng.x = random->RandomFloat(1.0f, 2.0f);
+	punchAng.y = random->RandomFloat(-2.0f, -1.0f);
+	punchAng.z = 0.0f;
+
+	pPlayer->ViewPunch(punchAng); // Apply some recoil to the player, using the random QAngle.
 }

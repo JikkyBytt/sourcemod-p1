@@ -1,8 +1,8 @@
 //========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose: Adds autojumping feature.
 //
-// $NoKeywords: $
+// $NoKeywords: $FixedByTheMaster974
 //=============================================================================//
 #include "cbase.h"
 #include "gamemovement.h"
@@ -60,6 +60,11 @@ ConVar option_duck_method("option_duck_method", "1", FCVAR_REPLICATED|FCVAR_ARCH
 ConVar debug_latch_reset_onduck( "debug_latch_reset_onduck", "1", FCVAR_CHEAT );
 #endif
 #endif
+
+// ---------
+// Autojump.
+// ---------
+ConVar cl_autojump("cl_autojump", "1", FCVAR_CLIENTDLL);
 
 // [MD] I'll remove this eventually. For now, I want the ability to A/B the optimizations.
 bool g_bMovementOptimizations = true;
@@ -2404,7 +2409,10 @@ bool CGameMovement::CheckJumpButton( void )
 		return false;
 #endif
 
-	if ( mv->m_nOldButtons & IN_JUMP )
+// ----------------------------------------------------------------------
+// Autojump if the jump button is being held and cl_autojump is set to 1.
+// ----------------------------------------------------------------------
+	if ( mv->m_nOldButtons & IN_JUMP && !cl_autojump.GetBool() )
 		return false;		// don't pogo stick
 
 	// Cannot jump will in the unduck transition.

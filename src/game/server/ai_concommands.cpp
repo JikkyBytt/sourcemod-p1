@@ -391,25 +391,34 @@ static ConCommand npc_focus("npc_focus", CC_NPC_Focus, "Displays red line to NPC
 
 ConVar npc_create_equipment("npc_create_equipment", "");
 //------------------------------------------------------------------------------
-// Purpose: Create an NPC of the given type
+// Purpose: Create an NPC of the given type where the player is looking.
+//			Project 1: this used to be the body of CC_NPC_Create. It is a function
+//			of its own now so p1_captain_spawn can reuse it.
+// Input  : pszClass     - entity class, e.g. "npc_combine_s"
+//			pszName       - targetname, or NULL
+//			pszEquipment  - weapon classname for "additionalequipment"
+// Output : the new NPC, or NULL if the class is no NPC or the spot was blocked
 //------------------------------------------------------------------------------
-void CC_NPC_Create( const CCommand &args )
+static CAI_BaseNPC *P1_CreateNPCAtCrosshair( const char *pszClass, const char *pszName, const char *pszEquipment )
 {
 	MDLCACHE_CRITICAL_SECTION();
+
+	CAI_BaseNPC *pResult = NULL;
+	bool bBadPosition = false;		// set when the spot was blocked and the NPC was removed again
 
 	bool allowPrecache = CBaseEntity::IsPrecacheAllowed();
 	CBaseEntity::SetAllowPrecache( true );
 
 	// Try to create entity
-	CAI_BaseNPC *baseNPC = dynamic_cast< CAI_BaseNPC * >( CreateEntityByName(args[1]) );
+	CAI_BaseNPC *baseNPC = dynamic_cast< CAI_BaseNPC * >( CreateEntityByName( pszClass ) );
 	if (baseNPC)
 	{
-		baseNPC->KeyValue( "additionalequipment", npc_create_equipment.GetString() );
+		baseNPC->KeyValue( "additionalequipment", pszEquipment );
 		baseNPC->Precache();
 
-		if ( args.ArgC() == 3 )
+		if ( pszName )
 		{
-			baseNPC->SetName( AllocPooledString( args[2] ) );
+			baseNPC->SetName( AllocPooledString( pszName ) );
 		}
 
 		DispatchSpawn(baseNPC);
@@ -445,16 +454,163 @@ void CC_NPC_Create( const CCommand &args )
 			if ( tr.startsolid || (tr.fraction < 1.0) )
 			{
 				baseNPC->SUB_Remove();
-				DevMsg("Can't create %s.  Bad Position!\n",args[1]);
+				bBadPosition = true;
+				DevMsg("Can't create %s.  Bad Position!\n",pszClass);
 				NDebugOverlay::Box(baseNPC->GetAbsOrigin(), baseNPC->GetHullMins(), baseNPC->GetHullMaxs(), 255, 0, 0, 0, 0);
 			}
 		}
 
 		baseNPC->Activate();
+
+		// Hand the NPC back to the caller, unless the blocked spot already removed it
+		if ( !bBadPosition )
+		{
+			pResult = baseNPC;
+		}
 	}
 	CBaseEntity::SetAllowPrecache( allowPrecache );
+
+	return pResult;
 }
-static ConCommand npc_create("npc_create", CC_NPC_Create, "Creates an NPC of the given type where the player is looking (if the given NPC can actually stand at that location).  Note that this only works for npc classes that are already in the world.  You can not create an entity that doesn't have an instance in the level.\n\tArguments:	{npc_class_name}", FCVAR_CHEAT);
+
+//------------------------------------------------------------------------------
+// Purpose: Create an NPC of the given type
+//------------------------------------------------------------------------------
+void CC_NPC_Create( const CCommand &args )
+{
+	P1_CreateNPCAtCrosshair( args[1], ( args.ArgC() == 3 ) ? args[2] : NULL, npc_create_equipment.GetString() );
+}
+static ConCommand npc_create("npc_create", CC_NPC_Create,"Creates an NPC of the given type where the player is looking (if the given NPC can actually stand at that location).  Note that this only works for npc classes that are already in the world.  You can not create an entity that doesn't have an instance in the level.\n\tArguments:	{npc_class_name}", FCVAR_CHEAT);
+
+
+//------------------------------------------------------------------------------
+// Purpose: Project 1 - make the NPC under the crosshair (the one "!picker" would
+//			pick) a captain, or change the level of an existing captain.
+//------------------------------------------------------------------------------
+void CC_P1_Captain_Promote( const CCommand &args )
+{
+	CBasePlayer *pPlayer = UTIL_GetCommandClient();
+	if ( !pPlayer )
+		return;
+
+	// FindPickerEntity is the cursor picker that npc_select, ent_fire !picker etc. use
+	CBaseEntity *pEntity = FindPickerEntity( pPlayer );
+	CAI_BaseNPC *pNPC = pEntity ? pEntity->MyNPCPointer() : NULL;
+	if ( !pNPC || !pNPC->IsAlive() )
+	{
+		Msg( "P1: no living NPC under the crosshair\n" );
+		return;
+	}
+
+	// No level given: level 1 for a new captain, an existing captain keeps his level
+	int iLevel = pNPC->IsP1Captain() ? pNPC->GetP1CaptainLevel() : 1;
+	if ( args.ArgC() > 1 )
+	{
+		iLevel = atoi( args[1] );
+	}
+
+	// Number 0 = keep his callsign, or pick a free one
+	pNPC->P1_MakeCaptain( 0, iLevel );
+}
+static ConCommand p1_captain_promote("p1_captain_promote", CC_P1_Captain_Promote, "Project 1: makes the NPC under the crosshair a captain (or sets an existing captain's level).\n\tArguments:	[level 1-15]", FCVAR_CHEAT);
+
+//------------------------------------------------------------------------------
+// Purpose: Project 1 - the living captain under the crosshair, or NULL (and a
+//			message in the console) if there is none.
+//------------------------------------------------------------------------------
+static CAI_BaseNPC *P1_FindPickedCaptain()
+{
+	CBasePlayer *pPlayer = UTIL_GetCommandClient();
+	CBaseEntity *pEntity = pPlayer ? FindPickerEntity( pPlayer ) : NULL;
+	CAI_BaseNPC *pNPC = pEntity ? pEntity->MyNPCPointer() : NULL;
+
+	if ( !pNPC || !pNPC->IsAlive() || !pNPC->IsP1Captain() )
+	{
+		Msg( "P1: no living captain under the crosshair\n" );
+		return NULL;
+	}
+
+	return pNPC;
+}
+
+//------------------------------------------------------------------------------
+// Purpose: Project 1 - stun the captain under the crosshair, same as a stunstick hit.
+//------------------------------------------------------------------------------
+void CC_P1_Captain_Stun( const CCommand &args )
+{
+	CAI_BaseNPC *pNPC = P1_FindPickedCaptain();
+	if ( !pNPC )
+		return;
+
+	// No argument: P1_Stun() uses the p1_captain_stun_time convar
+	pNPC->P1_Stun( ( args.ArgC() > 1 ) ? atof( args[1] ) : -1.0f );
+}
+static ConCommand p1_captain_stun("p1_captain_stun", CC_P1_Captain_Stun, "Project 1: stuns the captain under the crosshair (like a stunstick hit).\n\tArguments:	[seconds]", FCVAR_CHEAT);
+
+//------------------------------------------------------------------------------
+// Purpose: Project 1 - shame the captain under the crosshair, same as a lethal crowbar blow.
+//------------------------------------------------------------------------------
+void CC_P1_Captain_Shame( const CCommand &args )
+{
+	CAI_BaseNPC *pNPC = P1_FindPickedCaptain();
+	if ( !pNPC )
+		return;
+
+	// The player who typed the command counts as the attacker, so the captain runs from him
+	pNPC->P1_Shame( UTIL_GetCommandClient() );
+}
+static ConCommand p1_captain_shame("p1_captain_shame", CC_P1_Captain_Shame, "Project 1: shames the captain under the crosshair (like a lethal crowbar blow).", FCVAR_CHEAT);
+
+//------------------------------------------------------------------------------
+// Purpose: Project 1 - spawn a new captain where the player is looking.
+//------------------------------------------------------------------------------
+void CC_P1_Captain_Spawn( const CCommand &args )
+{
+	const char *pszClass = ( args.ArgC() > 1 ) ? args[1] : "npc_combine_s";
+	int iLevel = ( args.ArgC() > 2 ) ? atoi( args[2] ) : 1;
+
+	// npc_create_equipment wins if it is set, otherwise a sensible weapon for the class
+	const char *pszEquipment = npc_create_equipment.GetString();
+	if ( !pszEquipment[0] )
+	{
+		pszEquipment = FStrEq( pszClass, "npc_metropolice" ) ? "weapon_pistol" : "weapon_smg1";
+	}
+
+	CAI_BaseNPC *pNPC = P1_CreateNPCAtCrosshair( pszClass, NULL, pszEquipment );
+	if ( !pNPC )
+	{
+		Msg( "P1: could not spawn %s there\n", pszClass );
+		return;
+	}
+
+	pNPC->P1_MakeCaptain( 0, iLevel );
+}
+static ConCommand p1_captain_spawn("p1_captain_spawn", CC_P1_Captain_Spawn, "Project 1: spawns a captain where the player is looking.\n\tArguments:	[npc_class (default npc_combine_s)] [level 1-15]", FCVAR_CHEAT);
+
+//------------------------------------------------------------------------------
+// Purpose: Project 1 - print every captain that currently exists in the map.
+//------------------------------------------------------------------------------
+void CC_P1_Captain_List( const CCommand &args )
+{
+	CAI_BaseNPC **ppAIs = g_AI_Manager.AccessAIs();
+	int nAIs = g_AI_Manager.NumAIs();
+	int nCaptains = 0;
+
+	for ( int i = 0; i < nAIs; i++ )
+	{
+		CAI_BaseNPC *pNPC = ppAIs[i];
+		if ( !pNPC->IsP1Captain() )
+			continue;
+
+		nCaptains++;
+		Msg( "  captain %04d  level %2d  %s (entity %d)  HP %d/%d%s\n",
+			pNPC->GetP1CaptainNumber(), pNPC->GetP1CaptainLevel(), pNPC->GetClassname(),
+			pNPC->entindex(), pNPC->GetHealth(), pNPC->GetMaxHealth(), pNPC->IsAlive() ? "" : "  [dead]" );
+	}
+
+	Msg( "P1: %d captain(s)\n", nCaptains );
+}
+static ConCommand p1_captain_list("p1_captain_list", CC_P1_Captain_List, "Project 1: lists all captains in the current map.");
 
 
 //------------------------------------------------------------------------------

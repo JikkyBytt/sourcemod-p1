@@ -155,6 +155,7 @@ void CAI_BaseNPC::InitDefaultScheduleSR(void)
 	ADD_DEF_SCHEDULE( "SCHED_INTERACTION_WAIT_FOR_PARTNER",				SCHED_INTERACTION_WAIT_FOR_PARTNER );
 
 	ADD_DEF_SCHEDULE( "SCHED_SLEEP",					SCHED_SLEEP );
+	ADD_DEF_SCHEDULE( "SCHED_P1_FLEE",					SCHED_P1_FLEE );
 }
 
 bool CAI_BaseNPC::LoadDefaultSchedules(void)
@@ -246,6 +247,7 @@ bool CAI_BaseNPC::LoadDefaultSchedules(void)
 	AI_LOAD_DEF_SCHEDULE( CAI_BaseNPC,					SCHED_INTERACTION_MOVE_TO_PARTNER);
 	AI_LOAD_DEF_SCHEDULE( CAI_BaseNPC,					SCHED_INTERACTION_WAIT_FOR_PARTNER);
 	AI_LOAD_DEF_SCHEDULE( CAI_BaseNPC,					SCHED_SLEEP );
+	AI_LOAD_DEF_SCHEDULE( CAI_BaseNPC,					SCHED_P1_FLEE );
 
 	return true;
 }
@@ -2378,4 +2380,25 @@ AI_DEFINE_SCHEDULE
  ""
  );
 
+//=========================================================
+// > SCHED_P1_FLEE
+//
+// Project 1: how a shamed captain runs away. SCHED_RUN_FROM_ENEMY looks for the
+// NEAREST cover, so he reached it within a second, stopped, and started again.
+// This one looks for cover node at least 800 units away, so every leg of the
+// escape is long. Same fallback as SCHED_RUN_FROM_ENEMY when no cover is found.
+//=========================================================
+AI_DEFINE_SCHEDULE
+(
+	SCHED_P1_FLEE,
 
+	"	Tasks"
+	"		TASK_SET_FAIL_SCHEDULE				SCHEDULE:SCHED_RUN_FROM_ENEMY_FALLBACK"
+	"		TASK_FIND_FAR_NODE_COVER_FROM_ENEMY	800"
+	"		TASK_RUN_PATH						0"
+	"		TASK_WAIT_FOR_MOVEMENT				0"
+	""
+	"	Interrupts"
+	"		COND_NEW_ENEMY"
+	"		COND_ENEMY_DEAD"
+);

@@ -358,7 +358,7 @@ void CWeaponSMG1::SecondaryAttack( void )
 	CGrenadeAR2 *pGrenade = (CGrenadeAR2*)Create( "grenade_ar2", vecSrc, angles, pPlayer );
 	pGrenade->SetAbsVelocity( vecThrow );
 
-	pGrenade->SetLocalAngularVelocity( RandomAngle( -400, 400 ) );
+	//pGrenade->SetLocalAngularVelocity( RandomAngle( -400, 400 ) );
 	pGrenade->SetMoveType( MOVETYPE_FLYGRAVITY, MOVECOLLIDE_FLY_BOUNCE ); 
 	pGrenade->SetThrower( GetOwner() );
 	pGrenade->SetDamage( sk_plr_dmg_smg1_grenade.GetFloat() );

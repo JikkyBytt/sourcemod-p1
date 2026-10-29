@@ -1,6 +1,6 @@
 //========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose: Added glow effects when swinging.
 //
 //=============================================================================//
 
@@ -23,6 +23,7 @@ class CWeaponStunStick : public CBaseHLBludgeonWeapon
 public:
 
 	CWeaponStunStick();
+	~CWeaponStunStick(); // Addition.
 
 	DECLARE_SERVERCLASS();
 	DECLARE_ACTTABLE();
@@ -38,9 +39,12 @@ public:
 
 	bool		Deploy( void );
 	bool		Holster( CBaseCombatWeapon *pSwitchingTo = NULL );
+	void		ItemPostFrame(void); // Addition.
 	
+	void		Equip(CBaseCombatCharacter* pOwner); // Addition.
 	void		Drop( const Vector &vecVelocity );
-	void		ImpactEffect( trace_t &traceHit );
+//	void		ImpactEffect(trace_t& traceHit); // Removed!
+	void		PrimaryAttack(void); // Addition.
 	void		SecondaryAttack( void )	{}
 	void		SetStunState( bool state );
 	bool		GetStunState( void );
@@ -48,11 +52,13 @@ public:
 	
 	float		GetDamageForActivity( Activity hitActivity );
 
-	bool		CanBePickedUpByNPCs( void ) { return false;	}		
+	bool		CanBePickedUpByNPCs( void ) { return false;	}
+	void		AddViewKick(void); // Addition.
 
 private:
 
 	CNetworkVar( bool, m_bActive );
+	CNetworkVar(bool, m_bInSwing); // Addition.
 };
 
 #endif // WEAPON_STUNSTICK_H

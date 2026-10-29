@@ -464,6 +464,19 @@ CAI_Schedule *CAI_BaseNPC::GetNewSchedule( void )
 	{
 		scheduleType = SCHED_NPC_FREEZE;
 	}
+	// Project 1: a stunned captain convulses. The flinch animation is short, so choosing it
+	// again every time the last one ends keeps him twitching until the stun is over.
+	// (A model without a big flinch animation falls through to normal selection, the
+	// attack lock from P1_Stun still stops him shooting.)
+	else if ( P1_IsStunned() && HaveSequenceForActivity( GetFlinchActivity( true, false ) ) )
+	{
+		scheduleType = SCHED_BIG_FLINCH;
+	}
+	// Project 1: a shamed captain keeps running from his enemy until the shame is over
+	else if ( P1_IsShamed() && GetEnemy() )
+	{
+		scheduleType = SCHED_P1_FLEE;
+	}
 	else
 	{
 		// I dunno how this trend got started, but we need to find the problem.

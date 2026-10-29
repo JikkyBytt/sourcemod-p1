@@ -122,7 +122,11 @@ ConVar	sk_max_smg1				( "sk_max_smg1","0", FCVAR_REPLICATED);
 // FIXME: remove these
 //ConVar	sk_plr_dmg_flare_round	( "sk_plr_dmg_flare_round","0", FCVAR_REPLICATED);
 //ConVar	sk_npc_dmg_flare_round	( "sk_npc_dmg_flare_round","0", FCVAR_REPLICATED);
-//ConVar	sk_max_flare_round		( "sk_max_flare_round","0", FCVAR_REPLICATED);
+
+// P1 PATCH: how many flares the player can carry. Flares do no direct damage
+// (they ignite whoever they hit), so only the carry limit is needed.
+// Replicated so the client's ammo HUD agrees with the server.
+ConVar	sk_max_flare_round		( "sk_max_flare_round","5", FCVAR_REPLICATED);
 
 ConVar	sk_plr_dmg_buckshot		( "sk_plr_dmg_buckshot","0", FCVAR_REPLICATED);	
 ConVar	sk_npc_dmg_buckshot		( "sk_npc_dmg_buckshot","0", FCVAR_REPLICATED);
@@ -1811,6 +1815,10 @@ CAmmoDef *GetAmmoDef()
 		def.AddAmmoType("SniperRound",		DMG_BULLET | DMG_SNIPER,	TRACER_NONE,			"sk_plr_dmg_sniper_round",	"sk_npc_dmg_sniper_round",	"sk_max_sniper_round",	BULLET_IMPULSE(650, 6000), 0 );
 		def.AddAmmoType("SniperPenetratedRound", DMG_BULLET | DMG_SNIPER, TRACER_NONE,			"sk_dmg_sniper_penetrate_plr", "sk_dmg_sniper_penetrate_npc", "sk_max_sniper_round", BULLET_IMPULSE(150, 6000), 0 );
 		def.AddAmmoType("Grenade",			DMG_BURN,					TRACER_NONE,			"sk_plr_dmg_grenade",		"sk_npc_dmg_grenade",		"sk_max_grenade",		0, 0);
+		// P1 PATCH: ammo type used by weapon_flaregun and the existing item_flare_round /
+		// item_box_flare_rounds pickups, which already ask for "FlareRound" by name.
+		// Args: name, damage type, tracer, player dmg, npc dmg, carry limit, impulse, flags.
+		def.AddAmmoType("FlareRound",		DMG_BURN,					TRACER_NONE,			0, 0, "sk_max_flare_round", 0, 0 );
 		def.AddAmmoType("Thumper",			DMG_SONIC,					TRACER_NONE,			10, 10, 2, 0, 0 );
 		def.AddAmmoType("Gravity",			DMG_CLUB,					TRACER_NONE,			0,	0, 8, 0, 0 );
 //		def.AddAmmoType("Extinguisher",		DMG_BURN,					TRACER_NONE,			0,	0, 100, 0, 0 );

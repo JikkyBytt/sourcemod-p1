@@ -1,0 +1,56 @@
+--- src/game/server/ai_basenpc.cpp
++++ src/game/server/ai_basenpc.cpp
+@@ -5162,53 +5378,6 @@ void CAI_BaseNPC::PrescheduleThink( void )
+ 		}
+ 	}
+ 
+-	// Project 1: a captain shows his callsign, level and health above his head while the
+-	// player looks at him. The text is a debug overlay that is redrawn on every think and
+-	// expires on its own a moment later, so it vanishes when the player looks away.
+-	if ( m_iP1CaptainNumber != 0 && IsAlive() )
+-	{
+-		CBasePlayer *pPlayer = AI_GetSinglePlayer();
+-		if ( pPlayer )
+-		{
+-			// Unit direction and distance from the player's eyes to the middle of this NPC
+-			Vector vecToMe = WorldSpaceCenter() - pPlayer->EyePosition();
+-			float flDist = VectorNormalize( vecToMe );
+-
+-			Vector vecLook;
+-			pPlayer->EyeVectors( &vecLook );
+-
+-			// Close enough, near the crosshair (dot > 0.98 is about 11 degrees) and in line of sight
+-			if ( flDist < p1_captain_text_range.GetFloat() &&
+-				 DotProduct( vecLook, vecToMe ) > 0.98f &&
+-				 pPlayer->FVisible( this ) )
+-			{
+-				// Anchor the text just above his head. Line 0 is drawn at that point,
+-				// line 1 one text line below it.
+-				Vector vecTop = GetAbsOrigin();
+-				vecTop.z += CollisionProp()->OBBMaxs().z + 8.0f;
+-
+-				char szLine[96];
+-
+-				// First line: callsign plus his current state
+-				const char *pszState = P1_IsStunned() ? "  [STUNNED]" : ( P1_IsShamed() ? "  [SHAMED]" : "" );
+-				Q_snprintf( szLine, sizeof( szLine ), "CAPTAIN %04d%s", m_iP1CaptainNumber, pszState );
+-				NDebugOverlay::EntityTextAtPosition( vecTop, 0, szLine, 0.15f, 255, 200, 0, 255 );
+-
+-				// Second line: level and health, plus the number of scars once he has any
+-				if ( m_iP1CaptainShames > 0 )
+-				{
+-					Q_snprintf( szLine, sizeof( szLine ), "Lv %d   HP %d/%d   scars %d",
+-						m_iP1CaptainLevel, GetHealth(), GetMaxHealth(), m_iP1CaptainShames );
+-				}
+-				else
+-				{
+-					Q_snprintf( szLine, sizeof( szLine ), "Lv %d   HP %d/%d", m_iP1CaptainLevel, GetHealth(), GetMaxHealth() );
+-				}
+-				NDebugOverlay::EntityTextAtPosition( vecTop, 1, szLine, 0.15f, 255, 255, 255, 255 );
+-			}
+-		}
+-	}
+-
+ 	// If we use weapons, and our desired weapon state is not the current, fix it
+ 	if( (CapabilitiesGet() & bits_CAP_USE_WEAPONS) && (m_iDesiredWeaponState == DESIREDWEAPONSTATE_HOLSTERED || m_iDesiredWeaponState == DESIREDWEAPONSTATE_UNHOLSTERED || m_iDesiredWeaponState == DESIREDWEAPONSTATE_HOLSTERED_DESTROYED ) )
+ 	{

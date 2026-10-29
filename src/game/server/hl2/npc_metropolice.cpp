@@ -160,6 +160,10 @@ int ACT_MELEE_ATTACK_THRUST;
 int ACT_ACTIVATE_BATON;
 int ACT_DEACTIVATE_BATON;
  
+// Project 1: seconds between +using a metrocop and him switching sides
+static ConVar p1_metropolice_convert_delay( "p1_metropolice_convert_delay", "1.0", FCVAR_NONE,
+	"Seconds between +using a metrocop and him switching sides" );
+
 LINK_ENTITY_TO_CLASS( npc_metropolice, CNPC_MetroPolice );
 
 BEGIN_DATADESC( CNPC_MetroPolice )
@@ -214,6 +218,11 @@ BEGIN_DATADESC( CNPC_MetroPolice )
 	DEFINE_FIELD( m_flPreChaseYaw,		FIELD_FLOAT ),
 	DEFINE_FIELD( m_nNumWarnings,		FIELD_INTEGER ),
 	DEFINE_FIELD( m_iNumPlayerHits,		FIELD_INTEGER ),
+
+	// Project 1: +use conversion state
+	DEFINE_FIELD( m_bP1Converting, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_bP1Converted, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_flP1ConvertTime, FIELD_TIME ),
 
 	//								m_ActBusyBehavior (auto saved by AI)
 	//								m_StandoffBehavior (auto saved by AI)
@@ -466,6 +475,10 @@ void CNPC_MetroPolice::NotifyDeadFriend( CBaseEntity* pFriend )
 //-----------------------------------------------------------------------------
 CNPC_MetroPolice::CNPC_MetroPolice()
 {
+	// Project 1: not converted yet
+	m_bP1Converting = false;
+	m_bP1Converted = false;
+	m_flP1ConvertTime = 0;
 }
 
 
@@ -492,6 +505,90 @@ void CNPC_MetroPolice::PrescheduleThink( void )
 
 	// Speak any queued sentences
 	m_Sentences.UpdateSentenceQueue();
+
+	// Project 1: finish a pending +use conversion once the delay is over
+	if ( m_bP1Converting && IsAlive() && gpGlobals->curtime >= m_flP1ConvertTime )
+	{
+		m_bP1Converting = false;
+		m_bP1Converted = true;		// Classify() now returns CLASS_PLAYER_ALLY
+
+		// Next skin, wrapping around after the last one (a model with a single skin keeps it)
+		CStudioHdr *pStudioHdr = GetModelPtr();
+		int nSkins = pStudioHdr ? pStudioHdr->numskinfamilies() : 1;
+		if ( nSkins > 1 )
+		{
+			int nCurrentSkin = m_nSkin;
+			m_nSkin = ( nCurrentSkin + 1 ) % nSkins;
+		}
+
+		// Drop everything that was about policing the player
+		if ( m_PolicingBehavior.IsEnabled() )
+		{
+			m_PolicingBehavior.Disable();
+		}
+		m_bKeepFacingPlayer = false;
+		m_flChasePlayerTime = 0;
+		m_vecPreChaseOrigin = vec3_origin;
+		m_nNumWarnings = 0;
+
+		// Leave the Metrocop squad, forget the player and join the player's squad
+		RemoveFromSquad();
+		SetEnemy( NULL );
+		CBasePlayer *pPlayer = AI_GetSinglePlayer();
+		if ( pPlayer )
+		{
+			GetEnemies()->ClearMemory( pPlayer );
+
+			// Follow the player around like a citizen would
+			m_FollowBehavior.SetFollowTarget( pPlayer );
+			m_FollowBehavior.SetParameters( AIF_SIMPLE );
+		}
+		AddToSquad( AllocPooledString( PLAYER_SQUADNAME ) );
+
+		// The attack lock from the +use flinch ends now, so he can fight for the player
+		SetNextAttack( gpGlobals->curtime );
+
+		DevMsg( "P1: Metrocop %d is now an ally (skin %d)\n", entindex(), m_nSkin.Get() );
+	}
+
+	// Project 1: keep a converted NPC on the player's orders. With a command goal he follows
+	// the shared command point (moved onto the goal), without one he follows the player.
+	if ( m_bP1Converted && IsInPlayerSquad() )
+	{
+		CBaseEntity *pFollowTarget = m_FollowBehavior.GetFollowTarget();
+
+		if ( GetCommandGoal() != vec3_invalid )
+		{
+			// Same entity the citizens use, created on demand if no citizen spawned one
+			CBaseEntity *pCommandPoint = gEntList.FindEntityByClassname( NULL, "info_target_command_point" );
+			if ( !pCommandPoint )
+			{
+				pCommandPoint = CreateEntityByName( "info_target_command_point" );
+			}
+
+			if ( pCommandPoint )
+			{
+				if ( pFollowTarget != pCommandPoint )
+				{
+					m_FollowBehavior.SetFollowTarget( pCommandPoint );
+					m_FollowBehavior.SetParameters( AIF_COMMANDER );
+				}
+				if ( ( pCommandPoint->GetAbsOrigin() - GetCommandGoal() ).LengthSqr() > 0.01 )
+				{
+					UTIL_SetOrigin( pCommandPoint, GetCommandGoal(), false );
+				}
+			}
+		}
+		else
+		{
+			CBasePlayer *pFollowPlayer = AI_GetSinglePlayer();
+			if ( pFollowPlayer && pFollowTarget != pFollowPlayer )
+			{
+				m_FollowBehavior.SetFollowTarget( pFollowPlayer );
+				m_FollowBehavior.SetParameters( AIF_SIMPLE );
+			}
+		}
+	}
 
 	// Look at near players, always
 	m_bPlayerIsNear = false;
@@ -2714,6 +2811,10 @@ float CNPC_MetroPolice::MaxYawSpeed( void )
 //-----------------------------------------------------------------------------
 Class_T	CNPC_MetroPolice::Classify ( void )
 {
+	// Project 1: a converted cop fights for the player
+	if ( m_bP1Converted )
+		return CLASS_PLAYER_ALLY;
+
 	return CLASS_METROPOLICE;
 }
 
@@ -2723,6 +2824,10 @@ Class_T	CNPC_MetroPolice::Classify ( void )
 //-----------------------------------------------------------------------------
 bool CNPC_MetroPolice::PlayerIsCriminal( void )
 {
+	// Project 1: a converted cop doesn't warn, shove or arrest the player (that's all "pre-criminal" behaviour)
+	if ( m_bP1Converted )
+		return true;
+
 	if ( m_PolicingBehavior.IsEnabled() && m_PolicingBehavior.TargetIsHostile() )
 		return true;
 
@@ -5140,6 +5245,94 @@ void CNPC_MetroPolice::StunnedTarget( CBaseEntity *pTarget )
 		m_OnStunnedPlayer.FireOutput( this, this );
 		m_iNumPlayerHits++;
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - the player +uses a hostile cop. He plays his death noise
+//			and flinches, and PrescheduleThink() switches him to the next skin
+//			and to the player's side once p1_metropolice_convert_delay is over.
+//-----------------------------------------------------------------------------
+void CNPC_MetroPolice::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
+{
+	// Only a player can convert a living, still hostile cop who isn't busy in a script.
+	// Captains are excluded unless they are stunned, that is the only way to convert one.
+	// Everything else keeps the vanilla behaviour (PrecriminalUse via BaseClass::Use).
+	if ( !pActivator || !pActivator->IsPlayer() || !IsAlive() ||
+		 m_bP1Converting || m_bP1Converted || ( IsP1Captain() && !P1_IsStunned() ) ||
+		 m_NPCState == NPC_STATE_SCRIPT || IsInAScript() )
+	{
+		BaseClass::Use( pActivator, pCaller, useType, value );
+		return;
+	}
+
+	// The conversion takes over from the stun: end it, so he doesn't keep convulsing and
+	// stay unable to shoot once he fights for the player
+	P1_EndStun();
+
+	m_bP1Converting = true;
+	m_flP1ConvertTime = gpGlobals->curtime + p1_metropolice_convert_delay.GetFloat();
+
+	// 1) Death noise (the cop's version wants a damage info, an empty one is fine)
+	PainSound( CTakeDamageInfo() );
+
+	// 2) Flinch: the full-body flinch if the model has one, otherwise a flinch gesture
+	if ( HaveSequenceForActivity( GetFlinchActivity( true, false ) ) )
+	{
+		SetSchedule( SCHED_BIG_FLINCH );
+	}
+	else
+	{
+		PlayFlinchGesture();
+	}
+
+	// He can't shoot while he is flinching (lifted again in PrescheduleThink)
+	SetNextAttack( m_flP1ConvertTime );
+
+	DevMsg( "P1: Metrocop %d was +used, converting in %.1f s\n",
+		entindex(), p1_metropolice_convert_delay.GetFloat() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - only converted NPCs in the player's squad take orders.
+//-----------------------------------------------------------------------------
+bool CNPC_MetroPolice::IsCommandable()
+{
+	return ( m_bP1Converted && IsInPlayerSquad() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - the base class returns NULL here and only citizens override
+//			it, so without this commander mode refuses to work when one of ours
+//			is the first squad member.
+//-----------------------------------------------------------------------------
+CAI_BaseNPC *CNPC_MetroPolice::GetSquadCommandRepresentative()
+{
+	return IsCommandable() ? this : NULL;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - an order aimed at the player means "follow me".
+//-----------------------------------------------------------------------------
+bool CNPC_MetroPolice::TargetOrder( CBaseEntity *pTarget, CAI_BaseNPC **Allies, int numAllies )
+{
+	if ( pTarget && pTarget->IsPlayer() )
+	{
+		// Cancel any command goal, PrescheduleThink() then puts him back on the player
+		SetCommandGoal( vec3_invalid );
+		m_FollowBehavior.SetFollowTarget( pTarget );
+		m_FollowBehavior.SetParameters( AIF_SIMPLE );
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - can't reach the ordered point, so give up on it and
+//			follow the player again.
+//-----------------------------------------------------------------------------
+void CNPC_MetroPolice::OnMoveToCommandGoalFailed()
+{
+	SetCommandGoal( vec3_invalid );
 }
 
 //-----------------------------------------------------------------------------

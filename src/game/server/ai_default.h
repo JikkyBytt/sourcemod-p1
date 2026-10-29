@@ -111,6 +111,8 @@ enum
 
 	SCHED_SLEEP,
 
+	SCHED_P1_FLEE,		// Project 1: a shamed captain runs far away from his enemy
+
 	// ======================================
 	// IMPORTANT: This must be the last enum
 	// ======================================

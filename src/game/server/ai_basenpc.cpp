@@ -65,6 +65,7 @@
 #include "npcevent.h"
 #include "movevars_shared.h"
 #include "te_effect_dispatch.h"
+#include "igamesystem.h"
 #include "globals.h"
 #include "saverestore_bitstring.h"
 #include "checksum_crc.h"
@@ -138,6 +139,27 @@ ConVar	ai_show_think_tolerance( "ai_show_think_tolerance", "0" );
 ConVar	ai_debug_think_ticks( "ai_debug_think_ticks", "0" );
 ConVar	ai_debug_doors( "ai_debug_doors", "0" );
 ConVar  ai_debug_enemies( "ai_debug_enemies", "0" );
+
+// Project 1: target ID (the name/health/level text under the crosshair, see CP1TargetInfo)
+static ConVar p1_target_range( "p1_target_range", "2000", FCVAR_NONE,
+	"Maximum distance in units at which the entity under the crosshair is identified (0 = off)" );
+static ConVar p1_target_everything( "p1_target_everything", "1", FCVAR_NONE,
+	"1 = identify every entity under the crosshair, 0 = only NPCs and things that can take damage" );
+
+// Project 1: how long a stunstick hit keeps a captain stunned (he can be converted with +use meanwhile)
+static ConVar p1_captain_stun_time( "p1_captain_stun_time", "5", FCVAR_NONE,
+	"Seconds a captain stays stunned after a stunstick hit" );
+
+// Project 1: how long a captain runs away after a lethal crowbar blow
+static ConVar p1_captain_shame_time( "p1_captain_shame_time", "20", FCVAR_NONE,
+	"Seconds a shamed captain runs from the player before he fights again" );
+
+// Project 1: how hard a captain's level hits. Defaults give health = base * level * 2
+// and damage = normal * (1 + level * 0.3), so level 1 is 2x health and 1.3x damage.
+static ConVar p1_captain_health_per_level( "p1_captain_health_per_level", "2.0", FCVAR_NONE,
+	"Captain max health = ordinary max health * level * this" );
+static ConVar p1_captain_damage_per_level( "p1_captain_damage_per_level", "0.3", FCVAR_NONE,
+	"Captain damage multiplier = 1 + level * this" );
 
 ConVar	ai_rebalance_thinks( "ai_rebalance_thinks", "1" );
 ConVar	ai_use_efficiency( "ai_use_efficiency", "1" );
@@ -708,6 +730,35 @@ bool CAI_BaseNPC::PassesDamageFilter( const CTakeDamageInfo &info )
 //-----------------------------------------------------------------------------
 int CAI_BaseNPC::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 {
+	// Project 1: how a captain reacts to melee hits from the player.
+	// A hit only counts when the player himself delivered it (attacker and inflictor are
+	// the player, so grenades, fire and bullets don't count), and the weapon he is holding
+	// decides what happens: the stunstick stuns, the crowbar shames on the lethal blow.
+	if ( m_iP1CaptainNumber != 0 )
+	{
+		CBasePlayer *pAttackerPlayer = ToBasePlayer( info.GetAttacker() );
+		CBaseCombatWeapon *pHeld = NULL;
+		if ( pAttackerPlayer && info.GetInflictor() == pAttackerPlayer )
+		{
+			pHeld = pAttackerPlayer->GetActiveWeapon();
+		}
+
+		if ( pHeld && FClassnameIs( pHeld, "weapon_stunstick" ) )
+		{
+			// Stunstick: stun instead of hurt (he takes no damage, so it can never kill him)
+			P1_Stun();
+			return 0;
+		}
+
+		if ( pHeld && FClassnameIs( pHeld, "weapon_crowbar" ) && info.GetDamage() >= m_iHealth )
+		{
+			// Crowbar: the blow that would have killed him shames him instead,
+			// he keeps the health he had before the hit
+			P1_Shame( pAttackerPlayer );
+			return 0;
+		}
+	}
+
 	Forget( bits_MEMORY_INCOVER );
 
 	if ( !BaseClass::OnTakeDamage_Alive( info ) )
@@ -4744,11 +4795,445 @@ void CAI_BaseNPC::GatherConditions( void )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - turn this NPC into a captain (or change an existing captain).
+//			Both debug commands use this, and so will promotion-on-kill later.
+// Input  : iNumber - the captain's 4-digit callsign. 0 keeps the current one, or
+//					  picks a free one if this NPC isn't a captain yet.
+//			iLevel  - 1 .. P1_CAPTAIN_MAX_LEVEL (clamped)
+//-----------------------------------------------------------------------------
+void CAI_BaseNPC::P1_MakeCaptain( int iNumber, int iLevel )
+{
+	// Already a captain: keep his callsign, only the level changes
+	if ( iNumber == 0 )
+	{
+		iNumber = m_iP1CaptainNumber;
+	}
+
+	// New captain: roll 4-digit numbers until one isn't carried by another NPC.
+	// 200 tries is far more than needed, there are 9000 numbers and few captains.
+	if ( iNumber == 0 )
+	{
+		CAI_BaseNPC **ppAIs = g_AI_Manager.AccessAIs();
+		int nAIs = g_AI_Manager.NumAIs();
+
+		for ( int nTry = 0; nTry < 25 && iNumber == 0; nTry++ )
+		{
+			int iCandidate = random->RandomInt( 1000, 9999 );
+
+			bool bTaken = false;
+			for ( int i = 0; i < nAIs; i++ )
+			{
+				if ( ppAIs[i] != this && ppAIs[i]->m_iP1CaptainNumber == iCandidate )
+				{
+					bTaken = true;
+					break;
+				}
+			}
+
+			if ( !bTaken )
+			{
+				iNumber = iCandidate;
+			}
+		}
+
+		if ( iNumber == 0 )
+		{
+			Warning( "P1: could not find a free captain number\n" );
+			return;
+		}
+	}
+
+	m_iP1CaptainNumber = iNumber;
+	m_iP1CaptainLevel = clamp( iLevel, 1, P1_CAPTAIN_MAX_LEVEL );
+
+	// The level decides his health, so apply it now
+	P1_ApplyLevelStats();
+
+	Msg( "P1: %s (entity %d) is now captain %04d, level %d\n",
+		GetClassname(), entindex(), m_iP1CaptainNumber, m_iP1CaptainLevel );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - damage multiplier of this captain's level: 1 + level * 0.3
+//-----------------------------------------------------------------------------
+float CAI_BaseNPC::P1_GetDamageScale() const
+{
+	return 1.0f + p1_captain_damage_per_level.GetFloat() * m_iP1CaptainLevel;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - set the max health from the level: base * level * 2.
+//			The first call records his ordinary max health (m_iP1BaseMaxHealth), so
+//			promoting him again or changing his level never stacks on top of old
+//			scaling. He keeps the same fraction of health he had (a half dead
+//			captain stays half dead), and a dead body is never brought back.
+//-----------------------------------------------------------------------------
+void CAI_BaseNPC::P1_ApplyLevelStats()
+{
+	if ( m_iP1CaptainNumber == 0 )
+		return;
+
+	// Remember what he was before he was promoted (only the first time)
+	if ( m_iP1BaseMaxHealth <= 0 )
+	{
+		m_iP1BaseMaxHealth = MAX( 1, GetMaxHealth() );
+	}
+
+	int iOldMax = MAX( 1, GetMaxHealth() );
+	int iNewMax = MAX( 1, (int)( m_iP1BaseMaxHealth * m_iP1CaptainLevel * p1_captain_health_per_level.GetFloat() + 0.5f ) );
+
+	SetMaxHealth( iNewMax );
+
+	if ( IsAlive() )
+	{
+		float flFraction = clamp( (float)GetHealth() / (float)iOldMax, 0.0f, 1.0f );
+		SetHealth( MAX( 1, (int)( flFraction * iNewMax + 0.5f ) ) );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: CBaseEntity::TakeDamage multiplies every hit by what the attacker returns
+//			here, so this scales all of a captain's damage (bullets, baton, kicks,
+//			grenades he threw) without touching the weapons themselves.
+//-----------------------------------------------------------------------------
+float CAI_BaseNPC::GetAttackDamageScale( CBaseEntity *pVictim )
+{
+	float flScale = BaseClass::GetAttackDamageScale( pVictim );
+
+	if ( m_iP1CaptainNumber != 0 )
+	{
+		flScale *= P1_GetDamageScale();
+	}
+
+	return flScale;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - stun this NPC. He convulses (one flinch after the other, see
+//			GetNewSchedule), can't shoot, throws electric arcs (see PrescheduleThink)
+//			and can be converted with +use until the stun is over.
+// Input  : flSeconds - how long the stun lasts, negative = p1_captain_stun_time
+//-----------------------------------------------------------------------------
+void CAI_BaseNPC::P1_Stun( float flSeconds )
+{
+	if ( flSeconds < 0 )
+	{
+		flSeconds = p1_captain_stun_time.GetFloat();
+	}
+
+	if ( !IsAlive() || flSeconds <= 0 )
+		return;
+
+	m_flP1StunEndTime = gpGlobals->curtime + flSeconds;
+	m_flP1NextStunFx = 0;
+
+	// He can't shoot while he is stunned
+	SetNextAttack( m_flP1StunEndTime );
+
+	// Start convulsing right away: the full-body flinch if the model has one, otherwise a
+	// flinch gesture. When the flinch is over, GetNewSchedule() starts the next one for as
+	// long as the stun lasts.
+	if ( HaveSequenceForActivity( GetFlinchActivity( true, false ) ) )
+	{
+		SetSchedule( SCHED_BIG_FLINCH );
+	}
+	else
+	{
+		PlayFlinchGesture();
+	}
+
+	DevMsg( "P1: captain %04d stunned for %.1f s\n", m_iP1CaptainNumber, flSeconds );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - shame this NPC: he loses 3-5 levels (never below 1), gets a
+//			permanent scar, drops his weapon and runs from the attacker for
+//			p1_captain_shame_time seconds (GetNewSchedule keeps him running).
+// Input  : pAttacker - who shamed him, becomes his enemy so he has something to run from
+//-----------------------------------------------------------------------------
+void CAI_BaseNPC::P1_Shame( CBaseEntity *pAttacker )
+{
+	if ( !IsAlive() )
+		return;
+
+	// 1) Lose levels and get a scar. The scar is only a counter for now, it can drive
+	//    a skin or bodygroup later.
+	m_iP1CaptainLevel = MAX( 1, m_iP1CaptainLevel - random->RandomInt( 3, 5 ) );
+	m_iP1CaptainShames++;
+
+	// Fewer levels means less health. His health fraction stays the same.
+	P1_ApplyLevelStats();
+
+	// 2) Drop the weapon, and don't look for a new one (or this one) while ashamed
+	m_flP1ShameEndTime = gpGlobals->curtime + p1_captain_shame_time.GetFloat();
+	if ( GetActiveWeapon() )
+	{
+		Weapon_Drop( GetActiveWeapon() );
+	}
+	m_flNextWeaponSearchTime = m_flP1ShameEndTime;
+
+	// 3) Run. A shame ends a stun. The attacker has to be in his enemy memory, otherwise the
+	//    AI throws the enemy away again on its next think.
+	P1_EndStun();
+	if ( pAttacker )
+	{
+		UpdateEnemyMemory( pAttacker, pAttacker->GetAbsOrigin() );
+		if ( !GetEnemy() )
+		{
+			SetEnemy( pAttacker );
+		}
+	}
+	if ( GetEnemy() )
+	{
+		SetSchedule( SCHED_P1_FLEE );
+	}
+
+	Msg( "P1: captain %04d was shamed, now level %d, %d scar(s)\n",
+		m_iP1CaptainNumber, m_iP1CaptainLevel, m_iP1CaptainShames );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Project 1 - target ID, like the one in Counter-Strike: Source. Once per
+//			server frame this finds what the player is aiming at and sends its name,
+//			health and level to the client, which draws them under the crosshair
+//			(CHudP1Target in client/hl2/hud_health.cpp). It works for every entity,
+//			not only captains. The client does no lookups of its own, so nothing has to
+//			be networked on the entities themselves.
+//-----------------------------------------------------------------------------
+class CP1TargetInfo : public CAutoGameSystemPerFrame
+{
+public:
+	CP1TargetInfo() : CAutoGameSystemPerFrame( "CP1TargetInfo" )
+	{
+		m_iLastEntity = 0;
+		m_iLastHealth = -1;
+		m_flNextSend = 0;
+	}
+
+	// A new map or a loaded game starts from scratch
+	virtual void LevelInitPostEntity()
+	{
+		m_iLastEntity = 0;
+		m_iLastHealth = -1;
+		m_flNextSend = 0;
+	}
+
+	virtual void FrameUpdatePostEntityThink();
+
+private:
+	int		m_iLastEntity;		// entity index of the last message
+	int		m_iLastHealth;		// health in the last message, a change is sent at once
+	float	m_flNextSend;		// otherwise the message is repeated every 0.25 s
+};
+
+static CP1TargetInfo g_P1TargetInfo;
+
+void CP1TargetInfo::FrameUpdatePostEntityThink()
+{
+	// Singleplayer: the local player is the only one who sees the text
+	CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+	float flRange = p1_target_range.GetFloat();
+	if ( !pPlayer || !pPlayer->IsAlive() || flRange <= 0 )
+		return;
+
+	// What is under the crosshair? MASK_SHOT hits NPC hitboxes, props and brush entities
+	Vector vecForward;
+	pPlayer->EyeVectors( &vecForward );
+
+	trace_t tr;
+	UTIL_TraceLine( pPlayer->EyePosition(), pPlayer->EyePosition() + vecForward * flRange,
+		MASK_SHOT, pPlayer, COLLISION_GROUP_NONE, &tr );
+
+	// Nothing, or only the level geometry
+	CBaseEntity *pTarget = tr.m_pEnt;
+	if ( !pTarget || pTarget->IsWorld() )
+		return;
+
+	// With p1_target_everything 0, only NPCs and things that can take damage are identified
+	CAI_BaseNPC *pNPC = pTarget->MyNPCPointer();
+	if ( !pNPC && pTarget->m_takedamage == DAMAGE_NO && !p1_target_everything.GetBool() )
+		return;
+
+	// Health only means something for things that can be damaged, -1 = no health to show
+	int iHealth = ( pNPC || pTarget->m_takedamage != DAMAGE_NO ) ? MAX( 0, pTarget->GetHealth() ) : -1;
+	int iMaxHealth = pTarget->GetMaxHealth();
+
+	// Send when the target or its health changed. Otherwise repeat the message every 0.25 s,
+	// the client hides the text 0.6 s after the last one, so nothing is sent when there
+	// is no target.
+	if ( pTarget->entindex() == m_iLastEntity && iHealth == m_iLastHealth && gpGlobals->curtime < m_flNextSend )
+		return;
+
+	m_iLastEntity = pTarget->entindex();
+	m_iLastHealth = iHealth;
+	m_flNextSend = gpGlobals->curtime + 0.25f;
+
+	// ---- Line 1: the name ----
+	char szName[64];
+	if ( pNPC && pNPC->IsP1Captain() )
+	{
+		// A captain goes by his number, plus what is going on with him right now
+		const char *pszState = pNPC->P1_IsStunned() ? "  [STUNNED]" : ( pNPC->P1_IsShamed() ? "  [SHAMED]" : "" );
+		Q_snprintf( szName, sizeof( szName ), "CAPTAIN %04d%s", pNPC->GetP1CaptainNumber(), pszState );
+	}
+	else
+	{
+		// Names for the usual suspects: { classname, name shown }
+		static const char *s_pszNames[][2] =
+		{
+			{ "npc_combine_s",		"Combine Soldier" },
+			{ "npc_metropolice",	"Metrocop" },
+			{ "npc_citizen",		"Citizen" },
+			{ "npc_zombie",			"Zombie" },
+			{ "npc_fastzombie",		"Fast Zombie" },
+			{ "npc_poisonzombie",	"Poison Zombie" },
+			{ "npc_zombine",		"Zombine" },
+			{ "npc_headcrab",		"Headcrab" },
+			{ "npc_antlion",		"Antlion" },
+			{ "npc_antlionguard",	"Antlion Guard" },
+			{ "npc_manhack",		"Manhack" },
+			{ "npc_cscanner",		"City Scanner" },
+			{ "npc_clawscanner",	"Claw Scanner" },
+			{ "npc_rollermine",		"Rollermine" },
+			{ "npc_turret_floor",	"Turret" },
+			{ "npc_hunter",			"Hunter" },
+			{ "npc_strider",		"Strider" },
+			{ "npc_vortigaunt",		"Vortigaunt" },
+			{ "npc_barnacle",		"Barnacle" },
+		};
+
+		const char *pszClass = pTarget->GetClassname();
+		const char *pszFriendly = NULL;
+		for ( int i = 0; i < ARRAYSIZE( s_pszNames ); i++ )
+		{
+			if ( FStrEq( pszClass, s_pszNames[i][0] ) )
+			{
+				pszFriendly = s_pszNames[i][1];
+				break;
+			}
+		}
+
+		// An elite is a combine soldier with a different model
+		if ( pszFriendly && FStrEq( pszClass, "npc_combine_s" ) &&
+			 Q_stristr( STRING( pTarget->GetModelName() ), "super_soldier" ) )
+		{
+			pszFriendly = "Combine Elite";
+		}
+
+		if ( pszFriendly )
+		{
+			Q_strncpy( szName, pszFriendly, sizeof( szName ) );
+		}
+		else
+		{
+			// Everything else is made from its classname: "prop_physics" -> "Prop Physics",
+			// "npc_foo_bar" -> "Foo Bar"
+			if ( !Q_strnicmp( pszClass, "npc_", 4 ) )
+			{
+				pszClass += 4;
+			}
+
+			int iOut = 0;
+			bool bWordStart = true;
+			for ( ; *pszClass && iOut < (int)sizeof( szName ) - 1; pszClass++ )
+			{
+				char c = *pszClass;
+				if ( c == '_' )
+				{
+					szName[iOut++] = ' ';
+					bWordStart = true;
+					continue;
+				}
+				// Capitalise the first letter of each word (plain ASCII, no locale needed)
+				szName[iOut++] = ( bWordStart && c >= 'a' && c <= 'z' ) ? ( c - 32 ) : c;;
+				bWordStart = false;
+			}
+			szName[iOut] = 0;
+		}
+	}
+
+	// ---- Line 2: health and level ----
+	char szDetail[64];
+	szDetail[0] = 0;
+	if ( iHealth >= 0 )
+	{
+		// Show "40/40" when the maximum is known, a plain "40" when it isn't
+		if ( iMaxHealth > 0 && iMaxHealth >= iHealth )
+		{
+			Q_snprintf( szDetail, sizeof( szDetail ), "HP %d/%d", iHealth, iMaxHealth );
+		}
+		else
+		{
+			Q_snprintf( szDetail, sizeof( szDetail ), "HP %d", iHealth );
+		}
+	}
+
+	// Only captains have a level (and scars), everything else shows health alone
+	if ( pNPC && pNPC->IsP1Captain() )
+	{
+		char szLevel[32];
+		if ( pNPC->GetP1CaptainShames() > 0 )
+		{
+			Q_snprintf( szLevel, sizeof( szLevel ), "Lv %d   scars %d", pNPC->GetP1CaptainLevel(), pNPC->GetP1CaptainShames() );
+		}
+		else
+		{
+			Q_snprintf( szLevel, sizeof( szLevel ), "Lv %d", pNPC->GetP1CaptainLevel() );
+		}
+
+		if ( szDetail[0] )
+		{
+			Q_strncat( szDetail, "   ", sizeof( szDetail ), COPY_ALL_CHARACTERS );
+		}
+		Q_strncat( szDetail, szLevel, sizeof( szDetail ), COPY_ALL_CHARACTERS );
+	}
+
+	// ---- Colour: how the NPC feels about the player (the client turns it into a colour) ----
+	int iRelation = 0;		// 0 = neutral, 1 = friendly, 2 = hostile
+	if ( pNPC )
+	{
+		Disposition_t nDisposition = pNPC->IRelationType( pPlayer );
+		iRelation = ( nDisposition == D_HT ) ? 2 : ( ( nDisposition == D_LI ) ? 1 : 0 );
+	}
+
+	// Not reliable on purpose: a lost message is replaced by the next one a moment later
+	CSingleUserRecipientFilter filter( pPlayer );
+	UserMessageBegin( filter, "P1Target" );
+		WRITE_STRING( szName );
+		WRITE_STRING( szDetail );
+		WRITE_BYTE( iRelation );
+	MessageEnd();
+}
+
 void CAI_BaseNPC::PrescheduleThink( void )
 {
 #ifdef HL2_EPISODIC
 	CheckForScriptedNPCInteractions();
 #endif
+
+	// Project 1: a stunned captain can't shoot and throws electric arcs along his body.
+	// "TeslaHitboxes" is the client effect Valve uses for the antlion zap and the hunter.
+	if ( P1_IsStunned() && IsAlive() )
+	{
+		SetNextAttack( m_flP1StunEndTime );
+
+		if ( gpGlobals->curtime >= m_flP1NextStunFx )
+		{
+			CEffectData data;
+			data.m_nEntIndex = entindex();
+			data.m_flMagnitude = 3;
+			data.m_flScale = random->RandomFloat( 0.25f, 0.75f );
+			DispatchEffect( "TeslaHitboxes", data );
+
+			m_flP1NextStunFx = gpGlobals->curtime + random->RandomFloat( 0.1f, 0.25f );
+		}
+	}
+
+	// Project 1: a captain shows his callsign, level and health above his head while the
+	// player looks at him. The text is a debug overlay that is redrawn on every think and
+	// expires on its own a moment later, so it vanishes when the player looks away.
+
 
 	// If we use weapons, and our desired weapon state is not the current, fix it
 	if( (CapabilitiesGet() & bits_CAP_USE_WEAPONS) && (m_iDesiredWeaponState == DESIREDWEAPONSTATE_HOLSTERED || m_iDesiredWeaponState == DESIREDWEAPONSTATE_UNHOLSTERED || m_iDesiredWeaponState == DESIREDWEAPONSTATE_HOLSTERED_DESTROYED ) )
@@ -10645,6 +11130,13 @@ BEGIN_DATADESC( CAI_BaseNPC )
 	DEFINE_FIELD( m_flLastSawPlayerTime,			FIELD_TIME ),
   	DEFINE_FIELD( m_flLastAttackTime,			FIELD_TIME ),
 	DEFINE_FIELD( m_flLastEnemyTime,			FIELD_TIME ),
+	// Project 1: captain identity (saved with the game for now; the registry file takes over later)
+	DEFINE_FIELD( m_iP1CaptainNumber,			FIELD_INTEGER ),
+	DEFINE_FIELD( m_iP1CaptainLevel,			FIELD_INTEGER ),
+	DEFINE_FIELD( m_iP1CaptainShames,			FIELD_INTEGER ),
+	DEFINE_FIELD( m_iP1BaseMaxHealth,			FIELD_INTEGER ),
+	DEFINE_FIELD( m_flP1StunEndTime,			FIELD_TIME ),
+	DEFINE_FIELD( m_flP1ShameEndTime,			FIELD_TIME ),
   	DEFINE_FIELD( m_flNextWeaponSearchTime,	FIELD_TIME ),
 	DEFINE_FIELD( m_iszPendingWeapon,		FIELD_STRING ),
 	DEFINE_KEYFIELD( m_bIgnoreUnseenEnemies, FIELD_BOOLEAN , "ignoreunseenenemies"),
@@ -11325,6 +11817,13 @@ CAI_BaseNPC::CAI_BaseNPC(void)
 	m_iMySquadSlot				= SQUAD_SLOT_NONE;
 	m_flSumDamage				= 0;
 	m_flLastDamageTime			= 0;
+	m_iP1CaptainNumber			= 0;	// Project 1: everyone starts as an ordinary grunt
+	m_iP1CaptainLevel			= 1;
+	m_iP1CaptainShames			= 0;
+	m_iP1BaseMaxHealth			= 0;
+	m_flP1StunEndTime			= 0;
+	m_flP1ShameEndTime			= 0;
+	m_flP1NextStunFx			= 0;
 	m_flLastAttackTime			= 0;
 	m_flSoundWaitTime			= 0;
 	m_flNextEyeLookTime			= 0;

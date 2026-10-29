@@ -57,6 +57,15 @@ public:
 	int			ObjectCaps( void ) { return UsableNPCObjectCaps(BaseClass::ObjectCaps()); }
 	void		PrecriminalUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 
+	// Project 1: +use conversion
+	virtual void	Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+
+	// Project 1: commander mode (converted NPCs follow the player or go where he sends them)
+	virtual bool	IsCommandable();
+	virtual bool	TargetOrder( CBaseEntity *pTarget, CAI_BaseNPC **Allies, int numAllies );
+	virtual void	OnMoveToCommandGoalFailed();
+	virtual CAI_BaseNPC *GetSquadCommandRepresentative();
+
 	// These are overridden so that the cop can shove and move a non-criminal player safely
 	CBaseEntity *CheckTraceHullAttack( float flDist, const Vector &mins, const Vector &maxs, int iDamage, int iDmgType, float forceScale, bool bDamageAnyNPC );
 	CBaseEntity *CheckTraceHullAttack( const Vector &vStart, const Vector &vEnd, const Vector &mins, const Vector &maxs, int iDamage, int iDmgType, float flForceScale, bool bDamageAnyNPC );
@@ -452,6 +461,11 @@ private:
 	CAI_RappelBehavior		m_RappelBehavior;
 	CAI_PolicingBehavior	m_PolicingBehavior;
 	CAI_FollowBehavior		m_FollowBehavior;
+
+	// Project 1: +use conversion state
+	bool			m_bP1Converting;	// got +used, is flinching and waiting to switch sides
+	bool			m_bP1Converted;		// already fights for the player
+	float			m_flP1ConvertTime;	// gpGlobals->curtime at which the conversion completes
 
 	CAI_Sentence< CNPC_MetroPolice > m_Sentences;
 

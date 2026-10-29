@@ -77,7 +77,7 @@ extern ConVar autoaim_max_dist;
 
 extern int gEvilImpulse101;
 
-ConVar sv_autojump( "sv_autojump", "0" );
+ConVar sv_autojump( "sv_autojump", "1" );
 
 ConVar hl2_walkspeed( "hl2_walkspeed", "150" );
 ConVar hl2_normspeed( "hl2_normspeed", "190" );
@@ -1108,7 +1108,8 @@ void CHL2_Player::PlayerRunCommand(CUserCmd *ucmd, IMoveHelper *moveHelper)
 //-----------------------------------------------------------------------------
 void CHL2_Player::Spawn(void)
 {
-
+// Test line: prints to the console when the player spawns
+Msg( "MOD TEST: my own server.so is running!\n" );
 #ifndef HL2MP
 #ifndef PORTAL
 	SetModel( "models/player.mdl" );
@@ -2629,7 +2630,7 @@ int CHL2_Player::GiveAmmo( int nCount, int nAmmoIndex, bool bSuppressSound)
 //-----------------------------------------------------------------------------
 bool CHL2_Player::Weapon_CanUse( CBaseCombatWeapon *pWeapon )
 {
-#ifndef HL2MP	
+#ifdef HL2MP
 	if ( pWeapon->ClassMatches( "weapon_stunstick" ) )
 	{
 		if ( ApplyBattery( 0.5 ) )

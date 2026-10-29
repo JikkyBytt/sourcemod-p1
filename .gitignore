@@ -54,3 +54,5 @@ config.cfg
 # shader files
 *.tmp
 
+game/mod_episodic_p1/bin/
+*.dbg

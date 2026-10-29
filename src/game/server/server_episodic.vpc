@@ -6,7 +6,7 @@
 
 $Macro SRCDIR		"..\.."
 $Macro GAMENAME 	"episodic" [!$SOURCESDK]
-$Macro GAMENAME 	"mod_episodic" [$SOURCESDK]
+$Macro GAMENAME 	"mod_episodic_p1" [$SOURCESDK]
 
 $Include "$SRCDIR\game\server\server_base.vpc"
 
@@ -286,17 +286,17 @@ $Project "Server (Episodic)"
 
 			$Folder	"unused"
 			{
-				$File	"hl2\grenade_beam.cpp"
-				$File	"hl2\grenade_beam.h"
-				$File	"hl2\grenade_homer.cpp"
-				$File	"hl2\grenade_homer.h"
-				$File	"hl2\grenade_pathfollower.cpp"
-				$File	"hl2\grenade_pathfollower.h"
-				$File	"hl2\npc_missiledefense.cpp"
-				$File	"hl2\vehicle_apc.cpp"
-				$File	"hl2\weapon_cguard.cpp"
-				$File	"hl2\weapon_flaregun.cpp"
-				$File	"hl2\weapon_flaregun.h"
+//				$File	"hl2\grenade_beam.cpp"
+//				$File	"hl2\grenade_beam.h"
+//				$File	"hl2\grenade_homer.cpp"
+//				$File	"hl2\grenade_homer.h"
+//				$File	"hl2\grenade_pathfollower.cpp"
+//				$File	"hl2\grenade_pathfollower.h"
+//				$File	"hl2\npc_missiledefense.cpp"
+//				$File	"hl2\vehicle_apc.cpp"
+//				$File	"hl2\weapon_cguard.cpp"
+//				$File	"hl2\weapon_flaregun.cpp"
+//				$File	"hl2\weapon_flaregun.h"
 			}
 		}
 	}

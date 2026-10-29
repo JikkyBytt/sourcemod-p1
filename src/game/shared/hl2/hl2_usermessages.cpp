@@ -45,6 +45,7 @@ void RegisterUserMessages( void )
 	usermessages->Register( "LogoTimeMsg", 4 );
 	usermessages->Register( "AchievementEvent", -1 );
 	usermessages->Register( "UpdateJalopyRadar", -1 );
+	usermessages->Register( "P1Target", -1 );	// Project 1: name, health and level of the entity under the crosshair
 
 #ifndef _X360
 	// NVNT register haptic user messages
